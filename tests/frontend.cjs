@@ -1,15 +1,16 @@
 const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
-const code=fs.readFileSync('app.js','utf8');
+const code=fs.readFileSync('app.js','utf8'),passkeyCode=fs.readFileSync('passkeys.js','utf8'),markup=fs.readFileSync('index.html','utf8');
+const ids=new Set([...markup.matchAll(/id="([^"]+)"/g)].map(m=>m[1]));
 const clone=v=>JSON.parse(JSON.stringify(v));
 const sample={equipment:[{id:'fixture-equipment',name:'Synthetic appliance',manufacturer:'Fixture',category:'Kitchen',model:'A1',serial_number:'000123',notes:'<script>unsafe</script>',warranty_status:'unknown',evidence:{},revision:1}],tasks:[],task_equipment:[],history:[],history_equipment:[],attention:[{id:'fixture-attention',equipment_id:'fixture-equipment',question:'Synthetic follow-up',status:'open',resolution:'',revision:1}],documents:[],document_equipment:[]};
 function environment({signedIn=true,allowed=true}={}){
  const nodes=new Map(),events=new Map(),storage=new Map(),calls=[],fixture=clone(sample);let formValues={},writeFailure=false,hold=null,release;
  const state={allowed,writeFailure,fixture,calls};
- function element(selector){if(!nodes.has(selector))nodes.set(selector,{value:'',innerHTML:'',textContent:'',hidden:false,disabled:false,inert:false,open:false,dataset:{},classList:{toggle(){}},querySelector:s=>element(selector+' '+s),addEventListener:(name,fn)=>events.set(selector+':'+name,fn),setAttribute(name,value){this[name]=value;},removeAttribute(name){delete this[name];},showModal(){this.open=true;},close(){this.open=false;},select(){},click(){}});return nodes.get(selector);}
+ function element(selector){if(selector.startsWith('#')&&!ids.has(selector.slice(1).split(/[ .\[]/)[0]))throw Error('Missing element: '+selector);if(!nodes.has(selector))nodes.set(selector,{value:'',innerHTML:'',textContent:'',hidden:false,disabled:false,inert:false,open:false,dataset:{},children:[],replaceChildren(){this.children=[];},append(...children){this.children.push(...children);},classList:{toggle(){},add(){}},querySelector:s=>element(selector+' '+s),addEventListener:(name,fn)=>events.set(selector+':'+name,fn),setAttribute(name,value){this[name]=value;},removeAttribute(name){delete this[name];},showModal(){this.open=true;},close(){this.open=false;},select(){},click(){}});return nodes.get(selector);}
  const pages=['home','equipment','record','schedule','history'].map(name=>{const el=element('page-'+name);el.dataset.page=name;return el;});
  const nav=['home','equipment','schedule','history'].map(name=>{const el=element('nav-'+name);el.hash='#'+name;return el;});
  if(signedIn)storage.set('badillo-session',JSON.stringify({access_token:'synthetic-access',refresh_token:'synthetic-refresh',expires_at:Date.now()/1000+10000,user:{email:'fixture@example.invalid'}}));
- const document={querySelector:element,querySelectorAll:selector=>selector==='[data-page]'?pages:selector==='nav a'?nav:[],createElement:tag=>element('created-'+tag),addEventListener:(name,fn)=>events.set('document:'+name,fn)};
+ const document={getElementById:id=>ids.has(id)?element('#'+id):null,querySelector:element,querySelectorAll:selector=>selector==='[data-page]'?pages:selector==='nav a'?nav:[],createElement:tag=>element('created-'+tag),addEventListener:(name,fn)=>events.set('document:'+name,fn)};
  const window={addEventListener:(name,fn)=>events.set('window:'+name,fn),scrollTo(){}};
  const location={hash:'#home',href:'https://example.invalid/home-maintenance/',pathname:'/home-maintenance/',search:''};
  const fetch=async(url,options={})=>{
@@ -17,12 +18,15 @@ function environment({signedIn=true,allowed=true}={}){
   const good=body=>({ok:true,status:200,json:async()=>clone(body)});
   if(url==='config.json')return good({supabaseUrl:'https://backend.invalid',publishableKey:'synthetic-key'});
   if(url.includes('/auth/v1/user'))return good({id:'synthetic-user',email:'fixture@example.invalid'});
+  if(url.endsWith('/auth/v1/passkeys'))return good({passkeys:[]});
   if(url.endsWith('/rpc/home_access'))return good(state.allowed);
   if(url.endsWith('/rpc/home_save_equipment')){if(state.writeFailure)return {ok:false,status:409,json:async()=>({message:'Changed elsewhere. Reopen the latest record.',code:'40001'})};const p=JSON.parse(options.body);Object.assign(fixture.equipment[0],p.p_values);fixture.equipment[0].revision++;return good(fixture.equipment[0]);}
   if(url.includes('/rest/v1/home_')){if(hold){const h=hold;hold=null;await h;}const name=url.split('/rest/v1/home_')[1].split('?')[0];return good(fixture[name]||[]);}
   return good({});
  };
  const context=vm.createContext({fetch,console,document,window,location,URL,URLSearchParams,Blob,Date,Intl,AbortController,JSON,Math,Number,String,Object,Array,Set,Map,Promise,crypto:{randomUUID:()=> '77777777-7777-4777-8777-777777777777'},navigator:{clipboard:{writeText:async()=>{}}},history:{replaceState(){}},localStorage:{getItem:key=>storage.get(key)||null,setItem:(key,value)=>storage.set(key,value),removeItem:key=>storage.delete(key)},FormData:class{constructor(){return Object.entries(formValues);}},setTimeout:()=>1,clearTimeout(){},queueMicrotask,atob:value=>Buffer.from(value,'base64').toString('binary')});
+ vm.runInContext(fs.readFileSync('startup.js','utf8'),context);
+ vm.runInContext(passkeyCode,context);
  vm.runInContext(code+';globalThis.testAPI={get:()=>data,isAllowed:()=>authorized,load,openEditor,openReview,render,acceptPasskeySession};',context);
  return {api:context.testAPI,element,state,calls,storage,events,settle:async()=>{for(let i=0;i<5;i++)await new Promise(resolve=>setImmediate(resolve));},form:values=>{formValues=values;},holdNextRead(){hold=new Promise(resolve=>{release=resolve;});},release:()=>release?.()};
 }
@@ -34,6 +38,7 @@ function environment({signedIn=true,allowed=true}={}){
  let denied=environment({signedIn:false,allowed:false});await denied.settle();assert.equal(await denied.api.acceptPasskeySession(passkeySession),false);assert.equal(denied.api.get().equipment.length,0);assert.ok(!denied.calls.some(c=>c.url.includes('/rest/v1/home_')));
  env=environment({allowed:false});await env.settle();assert.equal(env.api.isAllowed(),false);assert.ok(!env.calls.some(c=>c.url.includes('/rest/v1/home_')),'Unapproved page requested tables');
  env=environment();await env.settle();assert.equal(env.api.isAllowed(),true,env.element('#feedback').textContent);assert.equal(env.api.get().equipment.length,1);assert.equal(env.element('#application').hidden,false);
+ assert.equal(typeof env.element('#manage-passkeys').onclick,'function');env.element('#manage-passkeys').onclick();assert.equal(env.element('#passkey-dialog').open,true,'Account Passkeys button did not open management');await env.settle();env.element('#close-passkeys').onclick();
  env.api.openEditor('equipment','fixture-equipment');assert.equal(env.element('#editor').open,true);assert.ok(env.element('#editFields').innerHTML.includes('&lt;script&gt;unsafe&lt;/script&gt;'),'Text inserted as executable markup');
  env.form({name:'Edited fixture',serial_number:'000123',notes:'Unsaved form note',warranty_status:'unknown'});env.state.writeFailure=true;await env.element('#editForm').onsubmit({preventDefault(){},target:{}});assert.equal(env.element('#editor').open,true);assert.ok(env.element('#editError').textContent.includes('Changed elsewhere'));assert.equal(env.api.get().equipment[0].name,'Synthetic appliance');
  env.state.writeFailure=false;await env.element('#editForm').onsubmit({preventDefault(){},target:{}});assert.equal(env.element('#editor').open,false);assert.equal(env.api.get().equipment[0].name,'Edited fixture');assert.equal(env.api.get().equipment[0].serial_number,'000123');

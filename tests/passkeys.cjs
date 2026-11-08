@@ -15,13 +15,13 @@ function environment({supported=true}={}){
  return {api,el,calls,accepted:()=>accepted,error:value=>{nativeError=value;},hold(){held=new Promise(resolve=>{resolveHeld=resolve;});},release:()=>resolveHeld?.(),settle:async()=>{for(let i=0;i<4;i++)await new Promise(resolve=>setImmediate(resolve));}};
 }
 (async()=>{
- let env=environment();await env.el('#passkey-create').onclick();assert.ok(env.el('#passkey-message').textContent.includes('Sign in'));assert.equal(env.calls.length,0);
+ let env=environment();await env.el('#passkey-create').onclick();assert.ok(env.el('#passkey-message').textContent.includes('Sign in'));assert.equal(env.calls.filter(c=>c.path||c.native).length,0);
  env.api.sync(true);await env.el('#passkey-create').onclick();let request=env.calls.find(c=>c.path?.endsWith('/registration/verify'));assert.equal(request.auth,true);assert.equal(request.body.challenge_id,'synthetic-challenge');assert.equal(request.body.credential.response.clientDataJSON,'AQID');assert.equal(request.body.credential.response.attestationObject,'Bwg');assert.equal(env.accepted(),0);
  const native=env.calls.find(c=>c.native).native;assert.deepEqual([...new Uint8Array(native.publicKey.challenge)],[1,2,3]);assert.deepEqual([...new Uint8Array(native.publicKey.user.id)],[4,5,6]);
  env.el('#manage-passkeys').onclick();await env.settle();const row=env.el('#passkey-list').children[0];await row.children[1].onclick();assert.ok(env.calls.some(c=>c.method==='DELETE'&&c.auth===true));assert.ok(env.calls.some(c=>c.confirm?.includes('wishlist')));
  env=environment();await env.el('#passkey-signin').onclick();request=env.calls.find(c=>c.path?.endsWith('/authentication/verify'));assert.equal(request.auth,false);assert.equal(request.body.credential.response.authenticatorData,'CQ');assert.equal(request.body.credential.response.signature,'Cg');assert.equal(env.accepted(),1);
  env=environment();env.error({name:'NotAllowedError'});await env.el('#passkey-signin').onclick();assert.ok(env.el('#passkey-signin-message').textContent.includes('cancelled'));assert.ok(!env.calls.some(c=>c.path?.endsWith('/verify')));
  env=environment();env.hold();const pending=env.el('#passkey-signin').onclick();await env.settle();env.api.clear();env.release();await pending;assert.ok(!env.calls.some(c=>c.path?.endsWith('/verify')),'Cancelled operation verified a credential');assert.equal(env.accepted(),0);
- env=environment({supported:false});assert.equal(env.el('#passkey-signin').disabled,true);assert.ok(env.el('#passkey-signin-message').textContent.includes('email'));
+ env=environment({supported:false});assert.equal(env.el('#passkey-signin').disabled,false);await env.el('#passkey-signin').onclick();assert.ok(env.el('#passkey-signin-message').textContent.includes('normal browser'));assert.ok(env.calls.some(c=>c.notice?.includes('normal browser')));
  console.log('PASS passkeys: approved enrollment, binary challenge/credential conversion, authenticated listing/removal, shared-account warning, sign-in, cancellation, stale-operation rejection and unsupported-browser email fallback.');
 })().catch(error=>{console.error(error);process.exitCode=1;});

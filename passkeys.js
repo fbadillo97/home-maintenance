@@ -3,8 +3,8 @@
  const $=s=>document.querySelector(s);
  let api,allowed=false,pending=false,operation=0,controller=null;
  const supported=()=>Boolean(window.isSecureContext&&window.PublicKeyCredential&&navigator.credentials?.create&&navigator.credentials?.get);
- const text=(value,error=false)=>{for(const id of ['#passkey-message','#passkey-signin-message']){const el=$(id);el.textContent=value;el.classList.toggle('error',error);}};
- function controls(){const available=supported();$('#passkey-signin').disabled=pending||!available;$('#passkey-create').disabled=pending||!available||!allowed;$('#passkey-refresh').disabled=pending||!allowed;}
+ const text=(value,error=false)=>{for(const id of ['#passkey-message','#passkey-signin-message']){const el=$(id);if(el){el.textContent=value;el.classList.toggle('error',error);}}if(value)api?.notify?.(value,error);};
+ function controls(){const available=supported();$('#passkey-signin').disabled=pending;$('#passkey-create').disabled=pending||!allowed;$('#passkey-refresh').disabled=pending||!allowed;}
  function cancel(){operation++;controller?.abort();controller=null;pending=false;controls();}
  function clear(){cancel();allowed=false;$('#passkey-list').replaceChildren();text('');const d=$('#passkey-dialog');if(d.open)d.close();controls();}
  function sync(isAuthorized){allowed=isAuthorized;$('#manage-passkeys').hidden=!allowed;controls();if(!supported())$('#passkey-signin-message').textContent='Passkeys are unavailable in this browser. You can still sign in by email.';}
@@ -35,7 +35,7 @@
  }
  async function run(registration){
   if(pending)return;
-  if(!supported()){text('This browser does not support passkeys. Email sign-in is still available.',true);return;}
+  if(!supported()){text('Passkeys are unavailable in this browser. Open this page in your normal browser, or sign in by email.',true);return;}
   if(!api.ready()){text('The page is still loading. Please wait a moment and try again.',true);return;}
   if(registration&&!allowed){text('Sign in with your approved home account before creating a passkey.',true);return;}
   const id=++operation,version=api.getGeneration();pending=true;controller=new AbortController();controls();
