@@ -13,10 +13,14 @@ select set_config('request.jwt.claims','{"sub":"11111111-1111-4111-8111-11111111
 do $$declare e public.home_equipment; result text; count_before integer;begin
  if not public.home_access() then raise exception 'Approved owner denied';end if;
  if not exists(select 1 from public.home_equipment where id='test-equipment') then raise exception 'Approved SELECT denied';end if;
- e:=public.home_save_equipment('test-equipment',1,'{"name":"Edited synthetic","serial_number":"000123","ownership_date":"2024-10","warranty_status":"unknown","manual_url":"https://example.invalid/manual.pdf"}');
- if e.revision<>2 or e.serial_number<>'000123' or e.ownership_date<>'2024-10' then raise exception 'Equipment save corrupted values';end if;
+ e:=public.home_save_equipment('test-equipment',1,'{"name":"Edited synthetic","serial_number":"000123","ownership_date":"2024-10-01","warranty_status":"unknown","manual_url":"https://example.invalid/manual.pdf"}');
+ if e.revision<>2 or e.serial_number<>'000123' or e.ownership_date<>date '2024-10-01' then raise exception 'Equipment save corrupted values';end if;
  begin perform public.home_save_equipment('test-equipment',1,'{"name":"Old save"}');raise exception 'Stale save accepted';exception when sqlstate '40001' then null;end;
  begin perform public.home_save_equipment('test-equipment',2,'{"name":"Invalid date","ownership_date":"2025-13"}');raise exception 'Invalid date accepted';exception when raise_exception then if sqlerrm='Invalid date accepted' then raise;end if;end;
+ begin perform public.home_save_equipment('test-equipment',2,'{"name":"Partial date","ownership_date":"2024-10"}');raise exception 'Partial date accepted';exception when raise_exception then if sqlerrm='Partial date accepted' then raise;end if;end;
+ begin perform public.home_save_equipment('test-equipment',2,jsonb_build_object('name','Future date','ownership_date',(current_date+10)::text));raise exception 'Future date accepted';exception when raise_exception then if sqlerrm='Future date accepted' then raise;end if;end;
+ e:=public.home_save_equipment('test-equipment',2,'{"name":"Unknown ownership","ownership_date":"","serial_number":"000123"}');
+ if e.ownership_date is not null then raise exception 'Unknown date was invented';end if;
  begin update public.home_equipment set notes='unauthorized direct write' where id='test-equipment';raise exception 'Direct write accepted';exception when insufficient_privilege then null;end;
  perform public.home_save_attention('test-attention',1,'resolved','Confirmed by synthetic test');
  begin perform public.home_save_attention('test-attention',1,'open','');raise exception 'Stale attention accepted';exception when sqlstate '40001' then null;end;
