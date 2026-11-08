@@ -9,7 +9,7 @@ const link=(url,label)=>safeURL(url)?`<a href="${esc(safeURL(url))}" target="_bl
 const recordLink=id=>{const e=data.equipment.find(e=>e.id===id);return e?`<a href="#equipment/${encodeURIComponent(id)}">${esc(e.name)}</a>`:'';};
 const notice=(text,error=false)=>{$('#feedback').textContent=text;$('#feedback').classList.toggle('error',error);};
 function saveSession(next){session=next;try{next?localStorage.setItem(SESSION_KEY,JSON.stringify(next)):localStorage.removeItem(SESSION_KEY);}catch{}}
-function clearPrivate(){authorized=false;data=empty();editing=null;reviewing=null;for(const url of blobs)URL.revokeObjectURL(url);blobs.clear();for(const id of ['inventory','record','schedule','history','homeTasks','homeAttention','homeHistory','editFields','reviewText','reviewQuestion','rough','reviewFeedback','editError','editTitle']){const el=$('#'+id);if(el){el.textContent='';if('value'in el)el.value='';}}for(const id of ['editor','review'])if($('#'+id).open)$('#'+id).close();$('#category').innerHTML='<option value="">All categories</option>';$('#historyEquipment').innerHTML='<option value="">All equipment</option>';$('#search').value='';$('#historyKind').value='';$('#application').hidden=true;$('#welcome').hidden=false;}
+function clearPrivate(cancelPasskeys=true){if(cancelPasskeys)window.homePasskeys?.clear();authorized=false;data=empty();editing=null;reviewing=null;for(const url of blobs)URL.revokeObjectURL(url);blobs.clear();for(const id of ['inventory','record','schedule','history','homeTasks','homeAttention','homeHistory','editFields','reviewText','reviewQuestion','rough','reviewFeedback','editError','editTitle']){const el=$('#'+id);if(el){el.textContent='';if('value'in el)el.value='';}}for(const id of ['editor','review'])if($('#'+id).open)$('#'+id).close();$('#category').innerHTML='<option value="">All categories</option>';$('#historyEquipment').innerHTML='<option value="">All equipment</option>';$('#search').value='';$('#historyKind').value='';$('#application').hidden=true;$('#welcome').hidden=false;}
 async function token(){
  if(!session?.access_token)throw Error('Please sign in.');
  if(Number(session.expires_at||0)<Date.now()/1000+60){
@@ -42,6 +42,7 @@ async function load(){
  finally{loading=false;renderShell();if(version!==generation&&session)queueMicrotask(load);}
 }
 function renderShell(){
+ window.homePasskeys?.sync(authorized);
  $('#application').hidden=!authorized;$('#welcome').hidden=authorized;$('#logout').hidden=!session;$('#refresh').hidden=!session;$('#refresh').disabled=loading||busy;$('#account').textContent=session?.user?.email||'';$('#login').hidden=!!session;
  if(!authorized&&session)$('#welcome').querySelector('p').textContent='Your account needs home maintenance access. You can refresh or sign out to use another account.';
  else if(!authorized)$('#welcome').querySelector('p').textContent='Sign in with your approved home account to view and maintain your records.';
@@ -95,4 +96,16 @@ $('#login').onsubmit=async event=>{event.preventDefault();const button=event.tar
 $('#logout').onclick=async()=>{const old=session;generation++;saveSession(null);clearPrivate();renderShell();notice('Signed out.');if(old?.access_token)fetch(config.supabaseUrl+'/auth/v1/logout?scope=local',{method:'POST',headers:{apikey:config.publishableKey,Authorization:'Bearer '+old.access_token}}).catch(()=>{});};
 window.addEventListener('storage',event=>{if(event.key===SESSION_KEY){generation++;try{session=JSON.parse(event.newValue);}catch{session=null;}clearPrivate();renderShell();load();}});
 window.addEventListener('focus',()=>{if(session&&!busy&&!$('#editor').open&&!$('#review').open)load();});
-(async()=>{try{const response=await fetch('config.json',{cache:'no-store'});if(!response.ok)throw Error('Configuration could not load.');config=await response.json();try{session=JSON.parse(localStorage.getItem(SESSION_KEY)||'null');}catch{}const callback=new URLSearchParams(location.hash.slice(1));if(callback.get('access_token')&&callback.get('refresh_token')){const next={access_token:callback.get('access_token'),refresh_token:callback.get('refresh_token'),expires_at:Date.now()/1000+Number(callback.get('expires_in')||3600)};saveSession(next);history.replaceState(null,'',location.pathname+location.search+'#home');}if(session){const user=await request('/auth/v1/user');session.user=user;saveSession(session);}await load();}catch(error){clearPrivate();notice(error.message,true);renderShell();}})();
+async function acceptPasskeySession(result){
+ const next=result?.session||result;
+ if(!next||typeof next.access_token!=='string'||!next.access_token||typeof next.refresh_token!=='string'||!next.refresh_token)throw Error('Passkey verification did not return a complete sign-in session. Use email sign-in.');
+ const expires=Number(next.expires_in||3600);if(!Number.isFinite(expires)||expires<=0)throw Error('Passkey session expiry was invalid.');
+ const version=++generation;clearPrivate(false);
+ session={access_token:next.access_token,refresh_token:next.refresh_token,expires_at:Date.now()/1000+expires};
+ try{
+  const user=await request('/auth/v1/user');if(version!==generation||!session)return false;
+  if(!user?.id)throw Error('Could not verify the passkey account.');
+  session.user=user;saveSession(session);await load();return authorized&&version===generation;
+ }catch(error){if(version===generation){saveSession(null);clearPrivate();renderShell();notice('Passkey sign-in could not finish: '+error.message,true);}throw error;}
+}
+(async()=>{try{window.homePasskeys?.init({request:(path,body,auth=true,method='POST')=>request(path,{method,body,auth}),acceptSession:acceptPasskeySession,notify:message=>notice(message),ready:()=>Boolean(config?.supabaseUrl&&config?.publishableKey),getGeneration:()=>generation});const response=await fetch('config.json',{cache:'no-store'});if(!response.ok)throw Error('Configuration could not load.');config=await response.json();try{session=JSON.parse(localStorage.getItem(SESSION_KEY)||'null');}catch{}const callback=new URLSearchParams(location.hash.slice(1));if(callback.get('access_token')&&callback.get('refresh_token')){const next={access_token:callback.get('access_token'),refresh_token:callback.get('refresh_token'),expires_at:Date.now()/1000+Number(callback.get('expires_in')||3600)};saveSession(next);history.replaceState(null,'',location.pathname+location.search+'#home');}if(session){const user=await request('/auth/v1/user');session.user=user;saveSession(session);}await load();}catch(error){clearPrivate();notice(error.message,true);renderShell();}})();

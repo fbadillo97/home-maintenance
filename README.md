@@ -31,3 +31,9 @@ Migration checks compared the 25 equipment records and 10 tasks with revision 6 
 Security advisors report informational RLS-without-policy notices for private tables whose direct client privileges are revoked; access is through checked functions. The existing project also reports disabled leaked-password protection. This app uses email links and adds no password flow. See https://supabase.com/docs/guides/database/database-linter?lint=0008_rls_enabled_no_policy and https://supabase.com/docs/guides/auth/password-security#password-strength-and-leaked-password-protection .
 
 Actual email delivery and browser layout require a user sign-in check. Automated checks do not claim that physical-device review.
+
+## Passkeys
+
+The sign-in screen offers passkeys; approved home users can create, list and remove their own keys from Passkeys in the account header. Email sign-in remains available for enrollment/recovery. The existing shared Supabase project and origin reuse wishlist passkeys. Removing a key affects that shared account, including wishlist sign-in; the confirmation explains this. Maintenance membership is still checked after Auth verifies the account.
+
+Keep the existing Supabase passkey configuration: RP ID fbadillo97.github.io and origin https://fbadillo97.github.io (no repository path). Do not change RP ID, since existing keys are bound to it. Native device enrollment/sign-in still requires a real browser/device prompt. The adapter uses the documented two-step Auth endpoints with native WebAuthn; no extra runtime package or credentials are added.

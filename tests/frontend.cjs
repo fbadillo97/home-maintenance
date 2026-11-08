@@ -23,11 +23,15 @@ function environment({signedIn=true,allowed=true}={}){
   return good({});
  };
  const context=vm.createContext({fetch,console,document,window,location,URL,URLSearchParams,Blob,Date,Intl,AbortController,JSON,Math,Number,String,Object,Array,Set,Map,Promise,crypto:{randomUUID:()=> '77777777-7777-4777-8777-777777777777'},navigator:{clipboard:{writeText:async()=>{}}},history:{replaceState(){}},localStorage:{getItem:key=>storage.get(key)||null,setItem:(key,value)=>storage.set(key,value),removeItem:key=>storage.delete(key)},FormData:class{constructor(){return Object.entries(formValues);}},setTimeout:()=>1,clearTimeout(){},queueMicrotask,atob:value=>Buffer.from(value,'base64').toString('binary')});
- vm.runInContext(code+';globalThis.testAPI={get:()=>data,isAllowed:()=>authorized,load,openEditor,openReview,render};',context);
+ vm.runInContext(code+';globalThis.testAPI={get:()=>data,isAllowed:()=>authorized,load,openEditor,openReview,render,acceptPasskeySession};',context);
  return {api:context.testAPI,element,state,calls,storage,events,settle:async()=>{for(let i=0;i<5;i++)await new Promise(resolve=>setImmediate(resolve));},form:values=>{formValues=values;},holdNextRead(){hold=new Promise(resolve=>{release=resolve;});},release:()=>release?.()};
 }
 (async()=>{
  let env=environment({signedIn:false});await env.settle();assert.equal(env.api.isAllowed(),false);assert.ok(!env.calls.some(c=>c.url.includes('/rest/v1/')),'Signed-out page requested private data');
+ const passkeySession={access_token:'synthetic-passkey',refresh_token:'synthetic-refresh',expires_in:3600};
+ await assert.rejects(()=>env.api.acceptPasskeySession({access_token:'incomplete'}));assert.equal(env.api.isAllowed(),false);
+ assert.equal(await env.api.acceptPasskeySession(passkeySession),true);assert.equal(env.api.get().equipment.length,1);
+ let denied=environment({signedIn:false,allowed:false});await denied.settle();assert.equal(await denied.api.acceptPasskeySession(passkeySession),false);assert.equal(denied.api.get().equipment.length,0);assert.ok(!denied.calls.some(c=>c.url.includes('/rest/v1/home_')));
  env=environment({allowed:false});await env.settle();assert.equal(env.api.isAllowed(),false);assert.ok(!env.calls.some(c=>c.url.includes('/rest/v1/home_')),'Unapproved page requested tables');
  env=environment();await env.settle();assert.equal(env.api.isAllowed(),true,env.element('#feedback').textContent);assert.equal(env.api.get().equipment.length,1);assert.equal(env.element('#application').hidden,false);
  env.api.openEditor('equipment','fixture-equipment');assert.equal(env.element('#editor').open,true);assert.ok(env.element('#editFields').innerHTML.includes('&lt;script&gt;unsafe&lt;/script&gt;'),'Text inserted as executable markup');
