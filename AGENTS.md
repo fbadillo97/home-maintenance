@@ -13,3 +13,5 @@ The existing Supabase project is shared with a separate wishlist app. Maintenanc
 Passkeys were explicitly approved. Reuse the shared Supabase account and existing RP ID/origin. Never change the RP ID or grant maintenance access based only on successful passkey authentication. Enrollment and management require approved home access; email recovery stays available. Removal must explain that the shared account key also serves the wishlist. Cancel stale device operations on sign-out/account changes.
 
 Keep HTML-linked scripts/styles versioned together when deploying UI updates; unversioned cached app code can leave new controls unbound. Test startup with all scripts in HTML order and selectors checked against real markup. Unsupported passkey clicks must explain the browser/email fallback rather than appear inert.
+
+Approved home users can add maintenance tasks directly from equipment or Schedule; no AI review is required. Preserve the selected equipment link, allow a blank due date, and never mark new tasks as completed. Keep creation retry-safe. backend/create-task.sql is already applied.

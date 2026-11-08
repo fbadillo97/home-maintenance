@@ -10,7 +10,7 @@ insert into public.home_documents(id,title,filename,content_type) values('test-d
 insert into home_private.document_files values('test-document',decode('AAEC','base64'));
 set local role authenticated;
 select set_config('request.jwt.claims','{"sub":"11111111-1111-4111-8111-111111111111","role":"authenticated"}',true);
-do $$declare e public.home_equipment; result text; count_before integer;begin
+do $$declare e public.home_equipment; result text; count_before integer;created public.home_tasks;begin
  if not public.home_access() then raise exception 'Approved owner denied';end if;
  if not exists(select 1 from public.home_equipment where id='test-equipment') then raise exception 'Approved SELECT denied';end if;
  e:=public.home_save_equipment('test-equipment',1,'{"name":"Edited synthetic","serial_number":"000123","ownership_date":"2024-10-01","warranty_status":"unknown","manual_url":"https://example.invalid/manual.pdf"}');
@@ -25,6 +25,22 @@ do $$declare e public.home_equipment; result text; count_before integer;begin
  perform public.home_save_attention('test-attention',1,'resolved','Confirmed by synthetic test');
  begin perform public.home_save_attention('test-attention',1,'open','');raise exception 'Stale attention accepted';exception when sqlstate '40001' then null;end;
  if public.home_document('test-document')->>'base64'<>'AAEC' then raise exception 'Document bytes changed';end if;
+ select count(*) into count_before from public.home_history;
+ created:=public.home_create_task('77777777-7777-4777-8777-777777777777','test-equipment','{"title":"  Synthetic new task  ","recurrence_unit":"months","recurrence_interval":"6","next_due_date":"2027-01-01","notes":"Owner supplied"}');
+ if created.title<>'Synthetic new task' or created.recurrence_interval<>6 or created.next_due_date<>date '2027-01-01' or created.last_completed_date is not null then raise exception 'New task fields are wrong';end if;
+ if not exists(select 1 from public.home_task_equipment where task_id=created.id and equipment_id='test-equipment') then raise exception 'New task was not linked';end if;
+ perform public.home_create_task('77777777-7777-4777-8777-777777777777','test-equipment','{"title":"Synthetic new task","recurrence_unit":"months","recurrence_interval":"6","next_due_date":"2027-01-01","notes":"Owner supplied"}');
+ if (select count(*) from public.home_tasks where id=created.id)<>1 then raise exception 'Retry duplicated task';end if;
+ if (select count(*) from public.home_history)<>count_before then raise exception 'Task creation invented completed work';end if;
+ begin perform public.home_create_task('77777777-7777-4777-8777-777777777777','test-equipment','{"title":"Different request"}');raise exception 'Changed retry accepted';exception when raise_exception then if sqlerrm='Changed retry accepted' then raise;end if;end;
+ created:=public.home_create_task('88888888-8888-4888-8888-888888888888',null,'{"title":"Household fixture","next_due_date":""}');
+ if created.recurrence_unit is not null or created.recurrence_interval is not null or created.next_due_date is not null then raise exception 'Optional fields were invented';end if;
+ if exists(select 1 from public.home_task_equipment where task_id=created.id) then raise exception 'Household task linked to arbitrary equipment';end if;
+ begin perform public.home_create_task('99999999-9999-4999-8999-999999999999','missing-equipment','{"title":"Invalid link"}');raise exception 'Invalid equipment accepted';exception when raise_exception then if sqlerrm='Invalid equipment accepted' then raise;end if;end;
+ begin perform public.home_create_task('99999999-9999-4999-8999-999999999999','test-equipment','{"title":""}');raise exception 'Empty task accepted';exception when raise_exception then if sqlerrm='Empty task accepted' then raise;end if;end;
+ begin perform public.home_create_task('99999999-9999-4999-8999-999999999999','test-equipment','{"title":"Bad interval","recurrence_unit":"months","recurrence_interval":"0"}');raise exception 'Invalid interval accepted';exception when raise_exception then if sqlerrm='Invalid interval accepted' then raise;end if;end;
+ begin perform public.home_create_task('99999999-9999-4999-8999-999999999999','test-equipment','{"title":"Bad date","next_due_date":"2025-02-30"}');raise exception 'Invalid due date accepted';exception when raise_exception then if sqlerrm='Invalid due date accepted' then raise;end if;end;
+
  result:=public.home_log_work('44444444-4444-4444-8444-444444444444','maintenance',current_date::text,'Synthetic completion',array['test-equipment'],'Owner',null,null,'test-task',1,(current_date+30));
  perform public.home_log_work('44444444-4444-4444-8444-444444444444','maintenance',current_date::text,'Synthetic completion',array['test-equipment'],'Owner',null,null,'test-task',1,(current_date+30));
  if (select count(*) from public.home_history where id=result)<>1 then raise exception 'Retry duplicated completion';end if;
@@ -36,6 +52,7 @@ end;$$;
 select set_config('request.jwt.claims','{"sub":"22222222-2222-4222-8222-222222222222","role":"authenticated","user_metadata":{"role":"owner"}}',true);
 do $$begin
  if public.home_access() then raise exception 'Unlisted account gained access';end if;
+ begin perform public.home_create_task('99999999-9999-4999-8999-999999999999','test-equipment','{"title":"Blocked task"}');raise exception 'Unlisted task creation allowed';exception when insufficient_privilege then null;end;
  if exists(select 1 from public.home_equipment) then raise exception 'Unlisted account read equipment';end if;
  begin perform public.home_document('test-document');raise exception 'Unlisted account read document';exception when insufficient_privilege then null;end;
  begin perform public.home_save_equipment('test-equipment',2,'{"name":"Blocked"}');raise exception 'Unlisted account wrote equipment';exception when insufficient_privilege then null;end;
@@ -45,6 +62,7 @@ do $$begin if public.home_access() then raise exception 'Unconfirmed account gai
 set local role anon;
 do $$begin
  begin perform public.home_access();raise exception 'Anonymous RPC allowed';exception when insufficient_privilege then null;end;
+ begin perform public.home_create_task('99999999-9999-4999-8999-999999999999',null,'{"title":"Blocked task"}');raise exception 'Anonymous task creation allowed';exception when insufficient_privilege then null;end;
  begin perform count(*) from public.home_equipment;raise exception 'Anonymous table access allowed';exception when insufficient_privilege then null;end;
 end;$$;
 reset role;
